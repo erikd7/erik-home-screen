@@ -18,72 +18,110 @@ import Home from './views/Home.vue'
 
 const wallpaper = ref('')
 const loaded = ref(false)
+const CACHE_NAME = 'wallpapers-cache-v1'
+let currentObjectUrl = null
+
+async function fetchAndCacheManifest() {
+  const cache = await caches.open(CACHE_NAME)
+  const manifestUrl = '/wallpapers/manifest.json'
+  let res = await cache.match(manifestUrl)
+  if (!res) {
+    try {
+      res = await fetch(manifestUrl)
+      if (res && res.ok) await cache.put(manifestUrl, res.clone())
+    } catch (e) {
+      // ignore network errors
+    }
+  }
+  if (res) return res.json()
+  return []
+}
+
+async function getCachedOrNetworkImage(path) {
+  const cache = await caches.open(CACHE_NAME)
+  const match = await cache.match(path)
+  if (match && match.ok) {
+    const blob = await match.blob()
+    return URL.createObjectURL(blob)
+  }
+
+  try {
+    const net = await fetch(path)
+    if (net && net.ok) {
+      await cache.put(path, net.clone())
+      const blob = await net.blob()
+      return URL.createObjectURL(blob)
+    }
+  } catch (e) {
+    // network failed
+  }
+  return null
+}
+
+async function cacheImage(path) {
+  const cache = await caches.open(CACHE_NAME)
+  const match = await cache.match(path)
+  if (match) return
+  try {
+    const res = await fetch(path)
+    if (res && res.ok) await cache.put(path, res.clone())
+  } catch (e) {
+    // ignore
+  }
+}
+
+function setWallpaperObjectUrl(objUrl) {
+  if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl)
+  currentObjectUrl = objUrl
+  wallpaper.value = objUrl
+  requestAnimationFrame(() => (loaded.value = true))
+}
 
 async function pickAndPreload() {
-  let list = []
-  try {
-    const res = await fetch('/wallpapers/manifest.json')
-    if (res.ok) list = await res.json()
-  } catch (e) {}
-
-  if (!Array.isArray(list) || !list.length) {
-    list = [
-      '10-10-6k.jpg',
-      '10-11-6k.jpg',
-      '10-12-6k.jpg',
-      '10-13-6k.jpg',
-      '10-9-6k.jpg',
-      '14-Sonoma-Horizon.png',
-      '15-Sequoia-Sunrise.png',
-      'big-sur-6016x6016-1476.jpg',
-      'big-sur-6016x6016-1492.jpg',
-      'big-sur-6016x6016-1496.jpg',
-      'big-sur-6016x6016-1497.jpg',
-      'big-sur-6016x6016-1498.jpg',
-      'big-sur-6016x6016-1499.jpg',
-      'coastline-6016x6016-3989.jpg',
-      'coastline-6016x6016-3994.jpg',
-      'coastline-6016x6016-3995.jpg',
-      'macos-big-sur-3200x3200-3774.jpg',
-      'macos-big-sur-6016x6016-3776.jpg',
-      'macos-big-sur-6016x6016-3777.jpg',
-      'macos-big-sur-6016x6016-3778.jpg',
-      'macos-big-sur-6016x6016-3781.jpg',
-      'macos-big-sur-6016x6016-3783.jpg',
-      'macos-big-sur-6016x6016-3784.jpg',
-      'macos-big-sur-6016x6016-3785.jpg',
-      'macos-big-sur-6016x6016-3795.jpg',
-      'macos-big-sur-6016x6016-4004.jpg',
-      'macos-big-sur-6016x6016-4011.jpg',
-      'macos-catalina-6016x6016-4009.jpg',
-      'macos-catalina-6016x6016-4013.jpg',
-      'macos-catalina-6016x6016-4015.jpg',
-      'macos-catalina-6016x6016-4019.jpg',
-      'macos-catalina-6016x6016-4021.jpg',
-      'macos-catalina-6016x6016-4022.jpg',
-      'macos-mojave-dynamic-wallpaper-5120x2880-32948.jpg',
-      'macos-mojave-dynamic-wallpaper-5120x2880-32949.jpg',
-      'macos-mojave-dynamic-wallpaper-5120x2880-32950.jpg',
-      'macos-mojave-dynamic-wallpaper-5120x2880-32952.jpg',
-      'macos-tahoe-26-5120x3413-31202.jpg',
-      'macos-tahoe-beach-dawn-6016x3384-32930.jpg',
-      'macos-tahoe-beach-day-6016x3384-32926.jpg',
-      'macos-tahoe-beach-dusk-6016x3384-32927.jpg',
-      'macos-tahoe-beach-night-6016x3384-32928.jpg',
-      'road-6016x6016-3996.jpg',
-    ]
+  const list = await fetchAndCacheManifest()
+  if (!list?.length) {
+    return
   }
 
-  const choice = `/wallpapers/${list[Math.floor(Math.random() * list.length)]}`
-  const img = new Image()
-  img.src = choice
-  img.onload = () => {
-    wallpaper.value = choice
-    requestAnimationFrame(() => (loaded.value = true))
+  const existingRaw = localStorage.getItem('wallpaper-name')
+  const existingName = existingRaw ? existingRaw.replace(/^\/wallpapers\//, '') : null
+
+  let currentName = null
+
+  // 1) load cached blob for existing wallpaper if present
+  if (existingName) {
+    console.log(`Loading existing wallpaper from cache: ${existingName}`)
+    const existingPath = `/wallpapers/${existingName}`
+    const cache = await caches.open(CACHE_NAME)
+    const match = await cache.match(existingPath)
+    if (match?.ok) {
+      const blob = await match.blob()
+      const obj = URL.createObjectURL(blob)
+      setWallpaperObjectUrl(obj)
+      currentName = existingName
+    }
   }
-  img.onerror = () => {
-    wallpaper.value = choice
-    loaded.value = true
+
+  // 2) if no cached existing, pick and load a new image and set as current
+  if (!currentName) {
+    const choiceName = list[Math.floor(Math.random() * list.length)]
+    const choicePath = `/wallpapers/${choiceName}`
+    const objUrl = await getCachedOrNetworkImage(choicePath)
+    if (objUrl) {
+      setWallpaperObjectUrl(objUrl)
+      localStorage.setItem('wallpaper-name', choiceName)
+      currentName = choiceName
+    }
+  }
+
+  // 4) prefetch an on-deck wallpaper into cache (don't display)
+  const onDeckPool = list.filter((n) => n !== currentName)
+  if (onDeckPool.length) {
+    const onDeckName = onDeckPool[Math.floor(Math.random() * onDeckPool.length)]
+    const onDeckPath = `/wallpapers/${onDeckName}`
+    console.log(`Prefetching on-deck wallpaper into cache: ${onDeckName}`)
+    localStorage.setItem('wallpaper-name', onDeckName)
+    await cacheImage(onDeckPath)
   }
 }
 
