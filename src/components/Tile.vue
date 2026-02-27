@@ -1,9 +1,5 @@
 <template>
-  <LiquidGlass
-    class="tile-container hover-grow cursor-pointer"
-    :style="{ '--scale': 1.02 }"
-    @click="$emit('launch', app)"
-  >
+  <LiquidGlass class="tile-container hover-grow cursor-pointer" :style="{ '--scale': 1.02 }">
     <div class="tile" @click="openLink(app.link)">
       <img
         v-if="app?.icon"
