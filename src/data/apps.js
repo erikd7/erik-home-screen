@@ -21,7 +21,7 @@ export default [
   },
   {
     name: 'Kenwood Sound',
-    link: 'http://192.168.86.100:1780',
+    link: 'http://192.168.86.100:80',
     icon: 'snapcast.png',
   },
   {
